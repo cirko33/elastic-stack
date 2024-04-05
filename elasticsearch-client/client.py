@@ -79,20 +79,10 @@ index = "logs-generic-default"
 
 # region range-query
 index = "logs-generic-default"
-
 target_index = "crack_possession_north"
-client.indices.create(index=target_index)
-print(f"Created index '{target_index}'.")
 
-mapping = {
-    "properties": {
-        "location_combined": {
-            "type": "geo_point"  
-        }
-    }
-}
-client.indices.put_mapping(index=target_index, body=mapping)
-print(f"Updated mapping for the 'location_combined' field in index '{target_index}'.")
+client.indices.create(index=target_index) 
+print(f"Created index '{target_index}'.")
 
 query = {
     "query": {
@@ -105,41 +95,62 @@ query = {
         }
     },
     "size": 10000,
-    "_source": ["location"]  
+    "_source": ["location"]
 }
 
 response = client.search(index=index, body=query)
 hits = response["hits"]["hits"]
+print(f"Retrieved {len(hits)} documents from the response.")
 
 actions = [
     {
-        "_index": target_index,  
+        "_index": target_index,
         "_source": doc['_source']
     }
-    for doc in hits
+    for doc in hits if doc['_source'].get('location') is not None
 ]
-helpers.bulk(client, actions)
-print(f"Indexed {len(actions)} documents to '{target_index}'.")
 
-query = {
-    "query": {
-        "exists": {"field": "location.lat"}  
+mapping = {
+    "properties": {
+        "location": {
+            "type": "geo_point"
+        }
     }
 }
+client.indices.put_mapping(index=target_index, body=mapping)
+print(f"Updated mapping for the 'location' field in index '{target_index}'.")
 
-response = client.search(index=target_index, body=query, size=10000)
-hits = response["hits"]["hits"]
+errors = []
+try:
+    for success, info in helpers.parallel_bulk(client, actions):
+        if not success:
+            errors.append(info)
+            print("Error:", info)
+except Exception as e:
+    print("An error occurred during bulk indexing:", e)
 
-for hit in hits:
-    doc_id = hit["_id"]
-    source = hit["_source"]
+print(f"Indexed {len(actions) - len(errors)} documents successfully to '{target_index}'.")
+print(f"Failed to index {len(errors)} documents.")
+
+# query = {
+#     "query": {
+#         "exists": {"field": "location.lat"}  
+#     }
+# }
+
+# response = client.search(index=target_index, body=query, size=10000)
+# hits = response["hits"]["hits"]
+
+# for hit in hits:
+#     doc_id = hit["_id"]
+#     source = hit["_source"]
     
-    if "location" in source and "lat" in source["location"] and "lon" in source["location"]:
-        lat = source["location"]["lat"]
-        lon = source["location"]["lon"]
-        source["location_combined"] = {"lat": lat, "lon": lon}
+#     if "location" in source and "lat" in source["location"] and "lon" in source["location"]:
+#         lat = source["location"]["lat"]
+#         lon = source["location"]["lon"]
+#         source["location_combined"] = {"lat": lat, "lon": lon}
         
-        client.index(index=target_index, id=doc_id, body=source)
+#         client.index(index=target_index, id=doc_id, body=source)
 
-print(f"Updated documents in index '{target_index}' to include the combined 'location_combined' field.")
+# print(f"Updated documents in index '{target_index}' to include the combined 'location_combined' field.")
 # endregion range-query
